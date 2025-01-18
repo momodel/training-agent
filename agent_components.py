@@ -229,30 +229,46 @@ class ContentGenerator:
         if not content or len(content.strip()) < 100:
             raise ValidationError("理论内容过短或为空")
         
-        # 检查是否包含必要的部分（支持多种标题格式）
-        title_patterns = [
-            ["# 背景介绍", "## 背景介绍", "背景介绍", "一、背景介绍", "1. 背景介绍", "1、背景介绍"],
-            ["# 理论讲解", "## 理论讲解", "理论讲解", "二、理论讲解", "2. 理论讲解", "2、理论讲解"],
-            ["# 实践应用", "## 实践应用", "实践应用", "三、实践应用", "3. 实践应用", "3、实践应用", "代码实现", "# 代码实现", "## 代码实现"]
-        ]
+        # 支持多种标题格式和变体
+        title_patterns = {
+            "任务定义": [
+                "# 任务定义与目标", "## 任务定义与目标", 
+                "任务定义与目标", "任务定义", "目标定义"
+            ],
+            "数据集介绍": [
+                "# 数据集介绍与加载", "## 数据集介绍与加载",
+                "数据集介绍", "数据集说明", "数据加载"
+            ],
+            "数据探索": [
+                "# 数据探索与分析", "## 数据探索与分析",
+                "数据探索", "数据分析", "探索性分析"
+            ],
+            "特征工程": [
+                "# 特征工程与预处理", "## 特征工程与预处理",
+                "特征工程", "数据预处理", "特征处理"
+            ],
+            "模型构建": [
+                "# 模型构建与训练", "## 模型构建与训练",
+                "模型构建", "模型训练", "算法实现"
+            ]
+        }
         
+        # 检查每个必需部分
         missing_sections = []
-        for patterns in title_patterns:
+        for section, patterns in title_patterns.items():
             if not any(pattern in content for pattern in patterns):
-                # 取第一个模式作为代表性名称（去掉 # 号）
-                section_name = patterns[0].replace("#", "").strip()
-                missing_sections.append(section_name)
+                missing_sections.append(section)
         
         # 如果内容长度足够且包含代码示例，我们可以适当放宽要求
         if len(content) >= 2000 and "```python" in content:
-            # 只要有背景介绍和理论讲解就可以了
-            missing_sections = [s for s in missing_sections if s not in ["实践应用"]]
+            # 只要有任务定义、数据集介绍和模型构建就可以了
+            missing_sections = [s for s in missing_sections if s in ["任务定义", "数据集介绍", "模型构建"]]
         
         if missing_sections:
             raise ValidationError(f"理论内容缺少以下部分: {', '.join(missing_sections)}")
         
-        # 检查内容长度是否合适（假设每个知识点至少需要500字）
-        if len(content) < 1500:  # 降低最小长度要求
+        # 检查内容长度是否合适
+        if len(content) < 1500:  # 保持最小长度要求
             raise ValidationError("理论内容长度不足，请确保内容充分详细")
     
     def _validate_code_content(self, content: str) -> None:
@@ -359,15 +375,78 @@ class NotebookAssembler:
         }
     
     def _organize_content(self, content: Dict[str, Any]) -> str:
-        """组织内容的顺序和结构"""
-        response = self.llm.chat.completions.create(
-            model=self.model,
-            messages=[{
-                "role": "user", 
-                "content": get_content_organization_prompt(content)
-            }]
-        )
-        return response.choices[0].message.content
+        """分段组织内容的顺序和结构"""
+        organized_parts = []
+        
+        # 1. 处理理论内容
+        if "theory" in content:
+            theory_prompt = f"""
+请优化以下理论内容的结构和组织，确保层次清晰，保持所有内容完整。
+主要关注：
+1. 标题层级的合理性
+2. 内容的连贯性
+3. 保持所有代码示例
+4. 确保数据集介绍、任务定义等核心部分完整
+
+内容如下：
+{content['theory']}
+"""
+            try:
+                theory_response = self.llm.chat.completions.create(
+                    model=self.model,
+                    messages=[{"role": "user", "content": theory_prompt}]
+                )
+                organized_parts.append(theory_response.choices[0].message.content)
+            except Exception as e:
+                self.logger.warning(f"理论内容优化失败，使用原内容: {str(e)}")
+                organized_parts.append(content["theory"])
+        
+        # 2. 处理代码示例（如果是独立的）
+        if "code" in content and isinstance(content["code"], str):
+            code_prompt = f"""
+请优化以下代码示例的组织，确保：
+1. 代码逻辑清晰
+2. 注释完整
+3. 每个步骤都有充分说明
+4. 保持所有功能完整
+
+代码示例：
+{content['code']}
+"""
+            try:
+                code_response = self.llm.chat.completions.create(
+                    model=self.model,
+                    messages=[{"role": "user", "content": code_prompt}]
+                )
+                organized_parts.append(code_response.choices[0].message.content)
+            except Exception as e:
+                self.logger.warning(f"代码示例优化失败，使用原内容: {str(e)}")
+                organized_parts.append(content["code"])
+        
+        # 3. 处理练习内容
+        if "exercises" in content:
+            exercises_prompt = f"""
+请优化以下练习内容的组织，确保：
+1. 练习题的难度递进
+2. 问题描述清晰
+3. 答案解释详细
+4. 保持所有练习题完整
+
+练习内容：
+{content['exercises']}
+"""
+            try:
+                exercises_response = self.llm.chat.completions.create(
+                    model=self.model,
+                    messages=[{"role": "user", "content": exercises_prompt}]
+                )
+                organized_parts.append(exercises_response.choices[0].message.content)
+            except Exception as e:
+                self.logger.warning(f"练习内容优化失败，使用原内容: {str(e)}")
+                organized_parts.append(content["exercises"])
+        
+        # 合并所有内容
+        return "\n\n".join(organized_parts)
 
     def _parse_content(self, content: str) -> List[Dict[str, str]]:
         """解析 LLM 返回的内容，将其分割成不同的部分"""
@@ -379,70 +458,46 @@ class NotebookAssembler:
         def save_current_markdown():
             nonlocal current_section
             if current_section["source"]:
-                # 过滤掉 markdown 中的代码块
-                filtered_lines = []
-                skip_code = False
-                for line in current_section["source"]:
-                    if "```" in line:
-                        skip_code = not skip_code
-                        continue
-                    if not skip_code:
-                        filtered_lines.append(line)
-                if filtered_lines:
-                    current_section["source"] = filtered_lines
-                    sections.append(current_section)
+                sections.append({
+                    "cell_type": "markdown",
+                    "metadata": {},
+                    "source": current_section["source"]
+                })
                 current_section = {"cell_type": "markdown", "source": []}
         
         while i < len(lines):
             line = lines[i].rstrip()
             
-            # 检查是否是代码块的开始
-            if "```python" in line or (line.strip() == "```" and i > 0 and "python" in lines[i-1]):
+            # 检查是否是 Python 代码块的开始
+            if line.strip() == "```python":
                 # 保存当前的 markdown 内容
                 save_current_markdown()
                 
                 # 收集代码内容
                 code_lines = []
                 i += 1  # 跳过开始标记
-                while i < len(lines):
-                    line = lines[i].rstrip()
-                    if "```" in line:  # 代码块结束
-                        break
-                    # 检查行是否包含实际代码（不是空行或注释）
-                    if line.strip() and not line.strip().startswith("#"):
-                        code_lines.append(line)
+                while i < len(lines) and not lines[i].strip() == "```":
+                    code_lines.append(lines[i].rstrip())
                     i += 1
                 
-                # 只有当代码行不为空时才创建代码单元格
+                # 创建代码单元格
                 if code_lines:
                     sections.append({
                         "cell_type": "code",
+                        "metadata": {},
                         "source": code_lines,
                         "execution_count": None,
                         "outputs": []
                     })
-            
-            # 处理普通文本
-            elif not (line.strip().startswith("```") and "python" in line):
+            else:
+                # 处理普通文本
                 current_section["source"].append(line)
-            
             i += 1
         
         # 保存最后的 markdown 内容
         save_current_markdown()
         
-        # 后处理：合并相邻的 markdown 单元格
-        merged_sections = []
-        for section in sections:
-            if (merged_sections and 
-                section["cell_type"] == "markdown" and 
-                merged_sections[-1]["cell_type"] == "markdown"):
-                # 合并相邻的 markdown 单元格
-                merged_sections[-1]["source"].extend(section["source"])
-            else:
-                merged_sections.append(section)
-        
-        return merged_sections
+        return sections
 
     def _convert_to_ipynb(self, content: str) -> str:
         """将内容转换为 ipynb 格式"""
@@ -468,9 +523,14 @@ class NotebookAssembler:
                 }
                 
                 if section["cell_type"] == "markdown":
+                    # Markdown 单元格使用单个字符串
                     cell["source"] = ["\n".join(section["source"])]
                 else:
-                    cell["source"] = section["source"]
+                    # 代码单元格保持每行独立
+                    cell["source"] = [line + "\n" for line in section["source"]]
+                    # 最后一行不需要额外的换行符
+                    if cell["source"]:
+                        cell["source"][-1] = cell["source"][-1].rstrip("\n")
                     cell["execution_count"] = None
                     cell["outputs"] = []
                 
