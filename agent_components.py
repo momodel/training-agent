@@ -232,24 +232,36 @@ class ContentGenerator:
         # 支持多种标题格式和变体
         title_patterns = {
             "任务定义": [
-                "# 任务定义与目标", "## 任务定义与目标", 
-                "任务定义与目标", "任务定义", "目标定义"
+                "# 任务定义", "## 任务定义", "### 任务定义",
+                "# 任务定义与目标", "## 任务定义与目标", "### 任务定义与目标",
+                "任务定义", "任务定义与目标"
             ],
             "数据集介绍": [
-                "# 数据集介绍与加载", "## 数据集介绍与加载",
-                "数据集介绍", "数据集说明", "数据加载"
+                "# 数据集介绍", "## 数据集介绍", "### 数据集介绍",
+                "# 数据集背景", "## 数据集背景", "### 数据集背景",
+                "# 数据集说明", "## 数据集说明", "### 数据集说明",
+                "数据集介绍", "数据集背景", "数据集说明",
+                "1. 数据集背景", "2. 字段说明", "3. 数据质量评估", "4. 数据集特点和价值"
             ],
             "数据探索": [
-                "# 数据探索与分析", "## 数据探索与分析",
-                "数据探索", "数据分析", "探索性分析"
+                "# 数据探索", "## 数据探索", "### 数据探索",
+                "# 数据探索与分析", "## 数据探索与分析", "### 数据探索与分析",
+                "# 探索性分析", "## 探索性分析", "### 探索性分析",
+                "数据探索", "数据探索与分析", "探索性分析",
+                "1. 数据分布分析", "2. 特征相关性分析", "3. 异常值检测", "4. 缺失值分析"
             ],
             "特征工程": [
-                "# 特征工程与预处理", "## 特征工程与预处理",
-                "特征工程", "数据预处理", "特征处理"
+                "# 特征工程", "## 特征工程", "### 特征工程",
+                "# 特征工程与预处理", "## 特征工程与预处理", "### 特征工程与预处理",
+                "特征工程", "特征工程与预处理",
+                "1. 数据预处理", "2. 特征选择", "3. 特征构造", "4. 特征编码"
             ],
             "模型构建": [
-                "# 模型构建与训练", "## 模型构建与训练",
-                "模型构建", "模型训练", "算法实现"
+                "# 模型构建", "## 模型构建", "### 模型构建",
+                "# 模型构建与训练", "## 模型构建与训练", "### 模型构建与训练",
+                "# 算法实现", "## 算法实现", "### 算法实现",
+                "模型构建", "模型构建与训练", "算法实现",
+                "1. 算法基础", "2. 参数详解", "3. 模型训练与评估", "4. 模型优化", "5. 模型应用"
             ]
         }
         
@@ -260,9 +272,10 @@ class ContentGenerator:
                 missing_sections.append(section)
         
         # 如果内容长度足够且包含代码示例，我们可以适当放宽要求
+        # 只要求包含任务定义、数据集介绍和模型构建这三个核心部分
         if len(content) >= 2000 and "```python" in content:
-            # 只要有任务定义、数据集介绍和模型构建就可以了
-            missing_sections = [s for s in missing_sections if s in ["任务定义", "数据集介绍", "模型构建"]]
+            core_sections = ["任务定义", "数据集介绍", "模型构建"]
+            missing_sections = [s for s in missing_sections if s in core_sections]
         
         if missing_sections:
             raise ValidationError(f"理论内容缺少以下部分: {', '.join(missing_sections)}")
@@ -304,13 +317,266 @@ class ContentGenerator:
 
     @RetryHandler().retry_on_exception
     def generate_theory(self, knowledge_points: List[str], dataset_info: Dict[str, Any]) -> str:
-        """生成理论解释内容"""
+        """分步生成理论解释内容"""
         try:
-            response = self._get_llm_response(
-                get_theory_prompt(knowledge_points, dataset_info)
-            )
-            self._validate_theory_content(response)
-            return response
+            parts = []
+            
+            # 1. 生成任务定义部分
+            task_prompt = f"""
+基于以下知识点和数据集，生成任务定义部分的内容：
+
+知识点：
+{', '.join(knowledge_points)}
+
+数据集信息：
+{json.dumps(dataset_info, ensure_ascii=False, indent=2)}
+
+请包含以下内容：
+1. 任务类型说明（结合知识点和数据集特点）
+2. 任务难点和挑战（针对具体数据集）
+3. 评估指标的选择和解释（适合该任务的指标）
+4. 预期目标和实际应用价值（在该场景下的应用）
+"""
+            task_response = self._get_llm_response(task_prompt)
+            parts.append(task_response)
+            
+            # 2. 生成数据集介绍部分
+            dataset_prompt = f"""
+基于以下知识点和数据集，详细介绍数据集：
+
+知识点：
+{', '.join(knowledge_points)}
+
+数据集信息：
+{json.dumps(dataset_info, ensure_ascii=False, indent=2)}
+
+请包含以下内容：
+1. 数据集背景：
+   - 数据来源和收集过程
+   - 数据规模和范围
+   - 在{', '.join(knowledge_points)}中的应用场景
+2. 字段说明：
+   - 每个字段的具体含义
+   - 数据类型和取值范围
+   - 与{', '.join(knowledge_points)}的关联
+   - 业务意义和重要性
+3. 数据质量评估：
+   - 完整性和准确性分析
+   - 数据分布特点
+   - 潜在的质量问题
+4. 数据集特点和价值：
+   - 对学习{', '.join(knowledge_points)}的帮助
+   - 实际应用中的价值
+"""
+            dataset_response = self._get_llm_response(dataset_prompt)
+            parts.append(dataset_response)
+            
+            # 3. 生成数据探索与分析部分
+            exploration_prompt = f"""
+基于以下知识点和数据集，生成数据探索与分析内容：
+
+知识点：
+{', '.join(knowledge_points)}
+
+数据集信息：
+{json.dumps(dataset_info, ensure_ascii=False, indent=2)}
+
+请包含以下内容：
+1. 数据分布分析：
+   - 重要特征的分布情况
+   - 与{', '.join(knowledge_points)}相关的特征分析
+   - 附带可视化代码
+2. 特征相关性分析：
+   - 特征间的关联关系
+   - 与目标变量的相关性
+   - 附带相关性分析代码
+3. 异常值检测：
+   - 基于领域知识的异常定义
+   - 异常值检测方法
+   - 附带检测代码
+4. 缺失值分析：
+   - 缺失值分布情况
+   - 对{', '.join(knowledge_points)}的影响
+   - 附带处理代码
+"""
+            exploration_response = self._get_llm_response(exploration_prompt)
+            parts.append(exploration_response)
+            
+            # 4. 生成特征工程部分
+            feature_prompt = f"""
+基于以下知识点和数据集，生成特征工程内容，注意要循序渐进，每个步骤都要配合代码示例：
+
+知识点：
+{', '.join(knowledge_points)}
+
+数据集信息：
+{json.dumps(dataset_info, ensure_ascii=False, indent=2)}
+
+背景说明：
+1. 本教程旨在讲解{', '.join(knowledge_points)}相关的特征工程方法
+2. 使用{dataset_info['data_type']}类型的数据集
+3. 针对{dataset_info['task_type']}任务进行特征处理
+
+请按以下步骤组织内容：
+
+1. 数据预处理：
+   a. 结合知识点，解释为什么需要进行预处理
+   b. 展示数据的初始状态，重点关注与{', '.join(knowledge_points)}相关的特征
+   ```python
+   # 展示代码
+   ```
+   c. 基于数据特点，处理缺失值和异常值
+   ```python
+   # 处理代码
+   ```
+   d. 分析处理结果对后续建模的影响
+
+2. 特征选择：
+   a. 结合{', '.join(knowledge_points)}，解释特征选择的重要性
+   b. 分析各特征对{dataset_info['target']}的影响
+   ```python
+   # 分析代码
+   ```
+   c. 使用合适的特征选择方法
+   ```python
+   # 选择代码
+   ```
+   d. 评估特征选择的效果
+
+3. 特征构造：
+   a. 基于{', '.join(knowledge_points)}的原理，设计新特征
+   b. 解释每个新特征的构造思路
+   ```python
+   # 构造代码
+   ```
+   c. 验证新特征的有效性
+   ```python
+   # 验证代码
+   ```
+   d. 分析新特征对模型的贡献
+
+4. 特征编码：
+   a. 针对{dataset_info['data_type']}数据的特点，选择编码方法
+   b. 实现特征编码
+   ```python
+   # 编码代码
+   ```
+   c. 检查编码结果
+   ```python
+   # 检查代码
+   ```
+   d. 评估编码效果
+
+每个步骤都要：
+1. 先解释原理和目的，要结合具体的知识点
+2. 展示代码实现，并解释关键步骤
+3. 分析处理结果
+4. 总结经验，特别是与{', '.join(knowledge_points)}相关的部分
+"""
+            feature_response = self._get_llm_response(feature_prompt)
+            parts.append(feature_response)
+            
+            # 5. 生成模型构建部分
+            model_prompt = f"""
+基于以下知识点和数据集，生成模型构建内容，要循序渐进地带领学生实践：
+
+知识点：
+{', '.join(knowledge_points)}
+
+数据集信息：
+{json.dumps(dataset_info, ensure_ascii=False, indent=2)}
+
+背景说明：
+1. 本教程主要讲解{', '.join(knowledge_points)}的原理和应用
+2. 使用{dataset_info['data_type']}类型的数据集
+3. 针对{dataset_info['task_type']}任务进行建模
+
+请按以下步骤组织内容：
+
+1. 算法基础：
+   a. 直观解释{', '.join(knowledge_points)}的基本原理
+   b. 核心概念解释：
+      - 算法的主要组成部分
+      - 关键参数和超参数
+      - 优化目标和损失函数
+   c. 实现一个简单的示例
+   ```python
+   # 基础实现代码
+   ```
+   d. 分析运行结果
+
+2. 参数详解：
+   a. 结合{dataset_info['task_type']}任务，解释各参数的作用
+   b. 进行参数实验
+   ```python
+   # 参数实验代码
+   ```
+   c. 可视化不同参数的效果
+   ```python
+   # 可视化代码
+   ```
+   d. 总结参数调优经验
+
+3. 模型训练与评估：
+   a. 设计训练流程
+   b. 实现交叉验证
+   ```python
+   # 训练代码
+   ```
+   c. 使用多种评估指标
+   ```python
+   # 评估代码
+   ```
+   d. 分析模型表现
+
+4. 模型优化：
+   a. 诊断模型问题
+   b. 实现优化方法
+   ```python
+   # 优化代码
+   ```
+   c. 对比优化效果
+   ```python
+   # 对比代码
+   ```
+   d. 总结优化经验
+
+5. 模型应用：
+   a. 结合实际场景，说明应用方法
+   b. 实现预测流程
+   ```python
+   # 应用代码
+   ```
+   c. 可视化预测结果
+   ```python
+   # 可视化代码
+   ```
+   d. 给出实践建议
+
+每个步骤都要：
+1. 通俗易懂地解释原理，要结合具体知识点
+2. 提供完整的代码示例
+3. 展示和分析运行结果
+4. 总结学习要点
+5. 提供思考题，加深理解
+
+注意：
+1. 代码要循序渐进，由简单到复杂
+2. 每个步骤都要有明确的学习目标
+3. 要有适当的交互性，让学生能跟着做
+4. 结合数据集特点来讲解
+5. 突出{', '.join(knowledge_points)}的关键知识点
+"""
+            model_response = self._get_llm_response(model_prompt)
+            parts.append(model_response)
+            
+            # 合并所有部分
+            complete_content = "\n\n".join(parts)
+            
+            # 验证完整内容
+            self._validate_theory_content(complete_content)
+            return complete_content
+            
         except Exception as e:
             self.logger.error(f"理论内容生成失败: {str(e)}")
             raise LLMError(f"理论内容生成失败: {str(e)}")
